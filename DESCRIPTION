@@ -1,0 +1,17 @@
+Package: RcppRP
+Type: Package
+Title: Portfolio optimization with random portfolios
+Version: 0.0.1
+Date: 2013-11-09
+Author: Ross Bennett
+Maintainer: Ross Bennett <rossbennett34@gmail.com>
+Description: Portfolio optimization with random portfolios
+License: What Licence is it under ?
+Depends:
+    Rcpp (>= 0.10.6),
+    RcppArmadillo (>= 0.3.920.1)
+LinkingTo: Rcpp, RcppArmadillo
+Collate:
+    'RcppExports.R'
+    'random_portfolios.R'
+    'moments.R'
