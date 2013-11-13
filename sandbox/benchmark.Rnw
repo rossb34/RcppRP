@@ -1,0 +1,82 @@
+\documentclass[a4paper]{article}
+\usepackage[OT1]{fontenc}
+\usepackage{Sweave}
+\usepackage{Rd}
+\usepackage{amsmath}
+\usepackage{bm}
+
+\usepackage{verbatim}
+\begin{document}
+
+Performance test of portfolio optimization with PortfolioAnalytics and RcppRP.
+
+<<portfolio_setup, tidy=FALSE>>=
+library(PortfolioAnalytics)
+library(RcppRP)
+library(rbenchmark)
+
+# Use parallel
+require(doMC)
+registerDoMC(3)
+
+data(edhec)
+R <- edhec[,1:10]
+funds <- colnames(R)
+
+weight_seq <- generatesequence(min=0, max=0.45, by=0.001)
+
+# Add basic constraints and objectives
+init.portf <- portfolio.spec(assets=funds, weight_seq=weight_seq)
+init.portf <- add.constraint(portfolio=init.portf, type="weight_sum", 
+                             min_sum=0.99, max_sum=1.01)
+init.portf <- add.constraint(portfolio=init.portf, type="box", min=0, max=0.45)
+init.portf <- add.objective(portfolio=init.portf, type="return", name="mean")
+init.portf <- add.objective(portfolio=init.portf, type="risk", name="sd")
+@
+
+The first benchmark is to compare creating random portfolios using PortfolioAnalytics and RcppRP. The \verb"rcpp_random_portfolios" function is a C++ implementation of the algorithm used in PortfolioAnalytics for generating random portfolios using the "sample" method. 
+<<rp_benchmark, tidy=FALSE>>=
+n_portfolios <- 5000
+benchmark(pa=random_portfolios(portfolio=init.portf, 
+                               permutations=n_portfolios, 
+                               rp_method="sample"),
+          rcpp_s=rcpp_random_portfolios(portfolio=init.portf,
+                                        n_portfolios=n_portfolios,
+                                        method="sample"),
+          replications=10)[,1:4]
+@
+
+A speed improvement of 6x is pretty good, but not that significant overall because I only need to generate the random portfolios one time for a single optimization and can re-use that set of random portfolios assuming the same assets, same constraints, etc. for the optimization.
+
+Test the portfolio optimization of RcppRP and make sure I get the same results as PortfolioAnalytics.
+<<opt_test, tidy=FALSE>>=
+# Test with a small number of portfolios
+rp <- random_portfolios(portfolio=init.portf, rp_method="sample", 
+                        permutations=100)
+
+pa_opt <- optimize.portfolio(R=R, portfolio=init.portf, 
+                             optimize_method="random", 
+                             rp=rp, trace=TRUE)
+xtract <- extractStats(pa_opt)
+
+rcpp_opt <- rp_optimize_v2(R=R, portfolio=init.portf, rp=rp)
+
+# make sure the results are equal
+all.equal(xtract, rcpp_opt$rp_results, check.attributes=FALSE)
+@
+
+Benchmark the optimization functions of PortfolioAnalytics and RcppRP. The \verb"rp_optimize_v2" uses slimmed down C++ implementations of \verb"constrained_objective" and \verb"optimize.portfolio" from PortfolioAnalytics. The objective, constrained objective, and optimization functions must all be in C++ so that I can "stay in C++ world" for the optimization when calling \verb"constrained_objective" for each set of weights.
+<<opt_benchmark, tidy=FALSE>>=
+# Create random portfolios that will be passed to both optimization functions
+rp <- random_portfolios(portfolio=init.portf, rp_method="sample", 
+                        permutations=5000)
+
+benchmark(pa=optimize.portfolio(R=R, portfolio=init.portf, 
+                                optimize_method="random", rp=rp),
+          rcpp=rp_optimize_v2(R=R, portfolio=init.portf, rp=rp),
+          replications=10)[,1:4]
+@
+
+This was a pretty simple optimization to maximize mean return per unit standard deviation with full investment and box constraints, but the performance improvement of more than 700x is significant. I haven't tested this with larger scale problems of 100+ assets, but I suspect that the improvement will be similar. This performance improvement will be even more noticeable for the implementation of \verb"optimize.portfolio.rebalancing".
+
+\end{document}
